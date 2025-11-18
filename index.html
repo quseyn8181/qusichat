@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>QusiChat</title>
+
+<!-- CSS -->
+<style>
+body{margin:0;font-family:sans-serif;background:#ececec;}
+.hidden{display:none;}
+
+.topbar{
+  background:#075e54;color:white;
+  padding:12px;font-size:20px;
+  text-align:center;font-weight:bold;
+}
+
+.screen{padding:15px;}
+
+input,button{
+  width:100%;padding:12px;margin:8px 0;
+  border-radius:10px;border:1px solid #ccc;
+  font-size:16px;
+}
+button{background:#075e54;color:white;border:none;}
+button.secondary{background:#128C7E;}
+
+.chat-item{
+  background:white;padding:15px;margin:10px 0;
+  border-radius:12px;display:flex;align-items:center;
+  cursor:pointer;
+}
+
+.avatar-small{
+  width:45px;height:45px;border-radius:50%;
+  background:#ccc;margin-right:10px;
+}
+
+#messages{
+  height:65vh;overflow-y:auto;padding:10px;
+  background:#dfe6e9;border-radius:12px;
+}
+
+.message{
+  padding:10px;background:white;display:inline-block;
+  margin:6px;border-radius:10px;max-width:70%;
+}
+.me{background:#dcf8c6 !important;margin-left:auto;display:block;}
+
+.input-area{display:flex;margin-top:10px;}
+#msgInput{flex:1;padding:12px;border-radius:10px;border:1px solid #ccc;}
+#sendBtn{width:60px;margin-left:10px;background:#128C7E;border-radius:10px;}
+
+.top-chat-bar{
+  display:flex;align-items:center;background:#075e54;
+  color:white;padding:10px;border-radius:10px;margin-bottom:10px;
+}
+.top-chat-bar img{
+  width:45px;height:45px;border-radius:50%;
+  margin-right:10px;background:#ddd;object-fit:cover;
+}
+
+#typing{font-size:12px;opacity:0.7;}
+
+#fileInput{display:none;}
+
+.attach-btn{
+  width:40px;height:40px;background:#128C7E;
+  color:white;border-radius:10px;margin-left:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;
+  cursor:pointer;
+}
+</style>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
+</head>
+
+<body>
+
+<div id="login-screen" class="screen">
+  <div class="topbar">QusiChat</div>
+  <h3>Вход</h3>
+  <input id="email" type="email" placeholder="Email">
+  <input id="pass" type="password" placeholder="Пароль">
+  <button id="loginBtn">Войти</button>
+  <button id="regBtn" class="secondary">Регистрация</button>
+</div>
+
+<div id="profile-screen" class="screen hidden">
+  <h3>Выберите аватар</h3>
+  <img id="avatarPreview" style="width:120px;height:120px;border-radius:50%;background:#ccc;object-fit:cover;">
+  <input type="file" id="avatarFile"/>
+  <button id="saveAvatarBtn">Сохранить</button>
+</div>
+
+<div id="chatlist-screen" class="screen hidden">
+  <div class="topbar">Ваши чаты</div>
+  <div id="contacts"></div>
+  <button id="newChatBtn">+ Новый чат</button>
+  <button id="logoutBtn" class="secondary">Выйти</button>
+</div>
+
+<div id="chat-screen" class="screen hidden">
+  <div class="top-chat-bar">
+    <img id="chatAvatar">
+    <div>
+      <div id="chatName"></div>
+      <div id="typing"></div>
+    </div>
+    <button id="backBtn" style="margin-left:auto;font-size:20px;">←</button>
+  </div>
+
+  <div id="messages"></div>
+
+  <div class="input-area">
+    <input id="msgInput" type="text" placeholder="Сообщение...">
+    <div class="attach-btn" id="attachBtn">📎</div>
+    <input type="file" id="fileInput" accept="image/*">
+    <button id="sendBtn">➤</button>
+  </div>
+</div>
+
+<script>
+// ================= FIREBASE ====================
+firebase.initializeApp({
+  apiKey:"AIzaSyCvu1wd28oWaU8iovkOGPL1VpV2k5uKiuM",
+  authDomain:"qusichat-7575b.firebaseapp.com",
+  projectId:"qusichat-7575b",
+  storageBucket:"qusichat-7575b.firebasestorage.app",
+  messagingSenderId:"532030768060",
+  appId:"1:532030768060:web:2238bf6b09e7fd658521b9"
+});
+
+const auth = firebase.auth();
+const db = firebase.firestore();
+const storage = firebase.storage();
+
+// ============= ELEMENTS ==================
+const loginScreen=document.getElementById("login-screen");
+const profileScreen=document.getElementById("profile-screen");
+const chatlistScreen=document.getElementById("chatlist-screen");
+const chatScreen=document.getElementById("chat-screen");
+
+const email=document.getElementById("email");
+const pass=document.getElementById("pass");
+const avatarFile=document.getElementById("avatarFile");
+const avatarPreview=document.getElementById("avatarPreview");
+
+const contacts=document.getElementById("contacts");
+const chatAvatar=document.getElementById("chatAvatar");
+const chatName=document.getElementById("chatName");
+const typing=document.getElementById("typing");
+const messages=document.getElementById("messages");
+
+let currentUser=null;
+let currentChat=null;
+let typingTimer=null;
+
+// ============= AUTH =======================
+document.getElementById("regBtn").onclick=async()=>{
+  await auth.createUserWithEmailAndPassword(email.value,pass.value);
+  showProfile();
+};
+
+document.getElementById("loginBtn").onclick=async()=>{
+  await auth.signInWithEmailAndPassword(email.value,pass.value);
+};
+
+auth.onAuthStateChanged(async user=>{
+  if(!user){showLogin();return;}
+  currentUser=user;
+
+  const prof=await db.collection("users").doc(user.uid).get();
+  if(!prof.exists) showProfile();
+  else showChatList();
+});
+
+// ============= SCREENS ===================
+function showLogin(){
+  loginScreen.classList.remove("hidden");
+  profileScreen.classList.add("hidden");
+  chatlistScreen.classList.add("hidden");
+  chatScreen.classList.add("hidden");
+}
+
+function showProfile(){
+  loginScreen.classList.add("hidden");
+  profileScreen.classList.remove("hidden");
+}
+
+function showChatList(){
+  profileScreen.classList.add("hidden");
+  chatlistScreen.classList.remove("hidden");
+  loadChats();
+}
+
+function showChat(){
+  chatlistScreen.classList.add("hidden");
+  chatScreen.classList.remove("hidden");
+}
+
+// ============= SAVE AVATAR ================
+document.getElementById("saveAvatarBtn").onclick=async()=>{
+  const file=avatarFile.files[0];
+  if(!file)return alert("Выберите фото");
+
+  const ref=storage.ref("avatars/"+currentUser.uid);
+  await ref.put(file);
+  const url=await ref.getDownloadURL();
+
+  await db.collection("users").doc(currentUser.uid).set({
+    email:currentUser.email,
+    avatar:url
+  });
+
+  showChatList();
+};
+
+avatarFile.onchange=()=>{
+  const f=avatarFile.files[0];
+  avatarPreview.src=URL.createObjectURL(f);
+};
+
+// ============= LOAD CHAT LIST =============
+async function loadChats(){
+  contacts.innerHTML="Загрузка...";
+
+  const q=await db.collection("chats")
+    .where("members","array-contains",currentUser.uid)
+    .get();
+
+  contacts.innerHTML="";
+
+  q.forEach(doc=>{
+    const data=doc.data();
+    const other = data.members.find(m=>m!==currentUser.uid);
+
+    db.collection("users").doc(other).get().then(u=>{
+      const d=u.data();
+      const div=document.createElement("div");
+      div.className="chat-item";
+      div.innerHTML=`
+        <img src="${d.avatar||''}" class="avatar-small">
+        <div>${d.email}</div>
+      `;
+      div.onclick=()=>openChat(doc.id,other);
+      contacts.appendChild(div);
+    });
+  });
+}
+
+// ============= CREATE NEW CHAT ================
+document.getElementById("newChatBtn").onclick=async()=>{
+  const email=prompt("Email пользователя:");
+  if(!email)return;
+
+  const q=await db.collection("users").where("email","==",email).get();
+  if(q.empty)return alert("Не найден");
+
+  const uid=q.docs[0].id;
+
+  const chat=await db.collection("chats").add({
+    members:[currentUser.uid,uid]
+  });
+
+  openChat(chat.id,uid);
+};
+
+// ============= OPEN CHAT ======================
+let unsubMessages=null;
+let unsubTyping=null;
+
+async function openChat(chatId,otherUserId){
+  currentChat=chatId;
+  showChat();
+
+  const u=await db.collection("users").doc(otherUserId).get();
+  chatName.innerText=u.data().email;
+  chatAvatar.src=u.data().avatar||"";
+
+  loadMessages(chatId);
+  listenTyping(chatId);
+}
+
+// ============= LOAD MESSAGES ===================
+function loadMessages(chatId){
+  if(unsubMessages)unsubMessages();
+
+  unsubMessages=db.collection("chats").doc(chatId)
+    .collection("messages").orderBy("time")
+    .onSnapshot(snap=>{
+      messages.innerHTML="";
+
+      snap.forEach(doc=>{
+        const m=doc.data();
+
+        if(m.type==="text"){
+          const div=document.createElement("div");
+          div.className="message";
+          if(m.sender===currentUser.uid)div.classList.add("me");
+          div.innerText=m.text;
+          messages.appendChild(div);
+        }
+
+        if(m.type==="image"){
+          const img=document.createElement("img");
+          img.src=m.url;
+          img.style.maxWidth="60%";
+          img.style.borderRadius="10px";
+          img.style.display="block";
+          img.style.margin="10px";
+          if(m.sender===currentUser.uid)img.style.marginLeft="auto";
+          messages.appendChild(img);
+        }
+      });
+
+      messages.scrollTop=messages.scrollHeight;
+    });
+}
+
+// ============= SEND TEXT MESSAGE ================
+document.getElementById("sendBtn").onclick=sendText;
+
+async function sendText(){
+  const text=document.getElementById("msgInput").value;
+  if(!text)return;
+
+  await db.collection("chats").doc(currentChat)
+    .collection("messages").add({
+      sender:currentUser.uid,
+      type:"text",
+      text,
+      time:Date.now()
+    });
+
+  document.getElementById("msgInput").value="";
+}
+
+// ============= ATTACH IMAGE ====================
+document.getElementById("attachBtn").onclick=()=>{
+  document.getElementById("fileInput").click();
+};
+
+document.getElementById("fileInput").onchange=sendImage;
+
+async function sendImage(){
+  const file=this.files[0];
+  if(!file)return;
+
+  const ref=storage.ref("chatImages/"+Date.now()+"_"+file.name);
+  await ref.put(file);
+  const url=await ref.getDownloadURL();
+
+  await db.collection("chats").doc(currentChat)
+    .collection("messages").add({
+      sender:currentUser.uid,
+      type:"image",
+      url,
+      time:Date.now()
+    });
+}
+
+// ============= TYPING INDICATOR =================
+document.getElementById("msgInput").oninput=()=>{
+  db.collection("chats").doc(currentChat)
+    .collection("typing").doc(currentUser.uid)
+    .set({typing:true});
+
+  clearTimeout(typingTimer);
+  typingTimer=setTimeout(()=>{
+    db.collection("chats").doc(currentChat)
+      .collection("typing").doc(currentUser.uid)
+      .set({typing:false});
+  },1000);
+};
+
+function listenTyping(chatId){
+  if(unsubTyping)unsubTyping();
+
+  unsubTyping=db.collection("chats").doc(chatId)
+    .collection("typing")
+    .onSnapshot(snap=>{
+      let someoneTyping=false;
+
+      snap.forEach(doc=>{
+        if(doc.id!==currentUser.uid && doc.data().typing) someoneTyping=true;
+      });
+
+      typing.innerText=someoneTyping?"печатает…":"";
+    });
+}
+
+// ============= BACK =====================
+document.getElementById("backBtn").onclick=()=>{
+  chatScreen.classList.add("hidden");
+  chatlistScreen.classList.remove("hidden");
+};
+
+// ============ LOGOUT ====================
+document.getElementById("logoutBtn").onclick=()=>auth.signOut();
+
+</script>
+
+</body>
+</html>
